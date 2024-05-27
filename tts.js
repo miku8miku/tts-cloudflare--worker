@@ -13,7 +13,7 @@ addEventListener('fetch', event => {
   
   async function handleHtmlRequest(request) {
     const html = `
-    <!DOCTYPE html>
+ <!DOCTYPE html>
     <html lang="zh">
     <head>
         <meta charset="UTF-8">
@@ -29,11 +29,12 @@ addEventListener('fetch', event => {
                         欢迎使用文本转语音
                         <el-input v-model="text" placeholder="请输入文本"></el-input>
                         <input type="file" @change="handleFileUpload">
-                        <el-checkbox v-model="download">是否下载</el-checkbox>
                         <el-input v-model="audioType" placeholder="音频编码"></el-input>
                         <el-input v-model="voiceName" placeholder="模型名称"></el-input>
                         <el-input v-model="pitch" placeholder="播放速度"></el-input>
-                        <el-button type="primary" @click="synthesizeText">合成</el-button>
+                        <el-button type="primary" @click="synthesizeText" :loading="isLoading">合成</el-button>
+                        <el-button type="primary" @click="playAudio" :disabled="!audioAvailable">播放</el-button>
+                        <el-button type="primary" @click="downloadAudio" :disabled="!audioAvailable">下载</el-button>
                     </div>
                 </el-card>
             </div>
@@ -47,10 +48,12 @@ addEventListener('fetch', event => {
                 data() {
                     return {
                         text: '',
-                        download: false,
                         audioType: '',
                         voiceName: '',
-                        pitch:''
+                        pitch: '',
+                        isLoading: false,
+                        audioAvailable: false,
+                        audioBlobs: []
                     };
                 },
                 methods: {
@@ -69,43 +72,71 @@ addEventListener('fetch', event => {
                             this.$message.error('文本不能为空');
                             return;
                         }
-                        
-                        const params = {
-                            text: this.text,
-                            audioType: this.audioType,
-                            voiceName: this.voiceName,
-                            download: this.download,
-                            pitch: this.pitch
-                        };
     
-                        try {
-                            const response = await fetch('/generate', {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify(params)
-                            });
+                        this.isLoading = true;
+                        this.audioAvailable = false;
+                        this.audioBlobs = [];
     
-                            if (response.ok) {
-                                const audioBlob = await response.blob();
-                                const audioUrl = URL.createObjectURL(audioBlob);
-                                if (this.download) {
-                                    const link = document.createElement('a');
-                                    link.href = audioUrl;
-                                    link.download = 'speech.mp3';
-                                    document.body.appendChild(link);
-                                    link.click();
-                                    document.body.removeChild(link);
+                        const textChunks = this.chunkText(this.text, 3000);
+    
+                        for (const chunk of textChunks) {
+                            const params = {
+                                text: chunk,
+                                audioType: this.audioType,
+                                voiceName: this.voiceName,
+                                pitch: this.pitch,
+                                download: false
+                            };
+    
+                            try {
+                                const response = await fetch('/generate', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify(params)
+                                });
+    
+                                if (response.ok) {
+                                    const audioBlob = await response.blob();
+                                    this.audioBlobs.push(audioBlob);
                                 } else {
-                                    const audio = new Audio(audioUrl);
-                                    audio.play().catch(error => console.error('播放失败:', error));
+                                    this.$message.error('合成失败，请重试');
+                                    this.isLoading = false;
+                                    return;
                                 }
-                            } else {
-                                this.$message.error('合成失败，请重试');
+                            } catch (error) {
+                                console.error('请求失败:', error);
+                                this.$message.error('请求失败，请重试');
+                                this.isLoading = false;
+                                return;
                             }
-                        } catch (error) {
-                            console.error('请求失败:', error);
-                            this.$message.error('请求失败，请重试');
                         }
+    
+                        this.isLoading = false;
+                        this.audioAvailable = true;
+                        this.$message.success('音频已准备好');
+                    },
+                    chunkText(text, chunkSize) {
+                        const chunks = [];
+                        for (let i = 0; i < text.length; i += chunkSize) {
+                            chunks.push(text.slice(i, i + chunkSize));
+                        }
+                        return chunks;
+                    },
+                    playAudio() {
+                        const audioBlob = new Blob(this.audioBlobs, { type: 'audio/mpeg' });
+                        const audioUrl = URL.createObjectURL(audioBlob);
+                        const audio = new Audio(audioUrl);
+                        audio.play().catch(error => console.error('播放失败:', error));
+                    },
+                    downloadAudio() {
+                        const audioBlob = new Blob(this.audioBlobs, { type: 'audio/mpeg' });
+                        const url = URL.createObjectURL(audioBlob);
+                        const link = document.createElement('a');
+                        link.href = url;
+                        link.download = 'speech.mp3';
+                        document.body.appendChild(link);
+                        link.click();
+                        document.body.removeChild(link);
                     }
                 }
             });
@@ -131,7 +162,9 @@ addEventListener('fetch', event => {
             }
         </style>
     </body>
-    </html>`;
+    </html>
+    
+`;
   
     return new Response(html, {
         headers: {
