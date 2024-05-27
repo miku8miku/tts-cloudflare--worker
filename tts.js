@@ -158,7 +158,7 @@ addEventListener('fetch', event => {
   if (download) params.append('download', download);
   if (pitch) params.append('pitch', pitch);
   
-  const url = `https://tts.mzzsfy.eu.org/api/tts?${params.toString()}`;
+  const url = `http://localhost:8080/api/tts?${params.toString()}`;
   
   try {
     const response = await fetch(url);
